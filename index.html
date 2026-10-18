@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Signwave</title>
+<meta name="description" content="Play music with your hands. Hold them up to your camera and every sign plays a note, always in key.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23d9a441' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4'/%3E%3C/svg%3E">
+<link rel="preload" href="fonts/newsreader-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wave-backdrop" id="wave" aria-hidden="true"></div>
+
+<header class="nav">
+  <a class="brand" href="#play"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4"/></svg>Signwave</a>
+  <nav>
+    <a class="btn btn-ghost btn-sm" href="#learn">How to play</a>
+    <button class="btn btn-ghost btn-sm" data-open="settings">Settings</button>
+  </nav>
+</header>
+
+<main>
+  <section class="screen hero" id="play">
+    <h1 class="screen-title"><span class="line">Make a sign,</span>
+      <span class="line">hear <span class="rotator" role="text" aria-label="a synth, a bass line, a guitar, a choir or bells"><span class="rotator-stack" aria-hidden="true"><span data-state="in">a synth</span><span data-state="below">a bass line</span><span data-state="below">a guitar</span><span data-state="below">a choir</span><span data-state="below">bells</span></span></span></span></h1>
+    <p class="screen-lede">Hold your hands up to the camera. Every sign plays a note, and every note fits the key.</p>
+
+    <div class="play-area">
+      <div class="stage night" id="stage" data-source="idle">
+        <canvas id="cv"></canvas>
+        <div class="stage-start" id="stageStart">
+          <div class="row">
+            <button class="btn btn-primary btn-lg" data-camera><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 10l5-3v10l-5-3"/><rect x="3" y="6" width="12" height="12" rx="2"/></svg>Turn on camera</button>
+            <button class="btn btn-outline btn-lg" id="botBtn"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg>Watch the bot play</button>
+          </div>
+          <p class="stage-note" id="camStatus">Tracking runs in your browser. Your video is never uploaded.</p>
+        </div>
+        <div class="stage-tools">
+          <button class="btn btn-sm" id="sourceBtn">Use my camera</button>
+          <button class="btn btn-sm" id="clipBtn" aria-pressed="false">Record clip</button>
+        </div>
+        <div class="toast" id="toast" role="status"></div>
+      </div>
+
+      <div class="signs" id="guide"></div>
+
+      <div class="deck">
+        <section class="panel hand" data-z="0"></section>
+        <section class="panel mix">
+          <div class="row">
+            <label class="field" style="flex:1"><span>Key</span><span class="row" style="gap:6px"><select id="key" aria-label="Key"></select><select id="scale" aria-label="Scale" style="flex:1"></select></span></label>
+            <div class="field"><span>Play by</span><div class="seg" id="mode"><button data-v="signs" aria-pressed="true">Signs</button><button data-v="pinch" aria-pressed="false">Pinch</button></div></div>
+          </div>
+          <div class="field"><span>Beat</span>
+            <div class="transport">
+              <button class="play-btn" id="playBtn" aria-label="Start the beat"><svg viewBox="0 0 24 24" fill="currentColor" id="playIco"><path d="M7 4v16l13-8z"/></svg></button>
+              <select id="beat" aria-label="Beat style"></select>
+              <label class="tempo"><span id="bpmTxt">96 bpm</span><input type="range" id="bpm" min="60" max="160" value="96" aria-label="Tempo"></label>
+            </div>
+            <div class="beats" id="steps"></div>
+          </div>
+          <div class="field"><span>Looper</span>
+            <div class="loop">
+              <button class="btn btn-outline loop-btn" id="loopBtn" data-s="idle">Record a loop</button>
+              <span class="row" style="gap:4px">
+                <select id="loopBars" aria-label="Loop length"><option value="1">1 bar</option><option value="2" selected>2 bars</option><option value="4">4 bars</option></select>
+                <button class="icon-btn" id="undoBtn" aria-label="Undo last layer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/></svg></button>
+                <button class="icon-btn" id="clearBtn" aria-label="Clear the loop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+              </span>
+              <div class="loop-meta"><span id="layers">Nothing recorded</span><span class="bar"><i id="lprog"></i></span></div>
+            </div>
+          </div>
+        </section>
+        <section class="panel hand" data-z="1"></section>
+      </div>
+    </div>
+  </section>
+
+  <section class="screen" id="learn">
+    <div class="screen-inner" style="width:min(100%,60rem)">
+      <h2 class="screen-title">Learn it in thirty seconds.</h2>
+      <div class="tutorial" id="tutorial">
+        <div class="stage night"><canvas aria-label="Animated tutorial"></canvas></div>
+        <div class="tut-caption" data-caption>
+          <div><h3></h3><p></p></div>
+          <div class="tut-controls">
+            <button class="icon-btn" data-sound aria-pressed="false" aria-label="Sound"><svg class="i-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 5 6 9H2v6h4l5 4zM22 9l-6 6M16 9l6 6"/></svg><svg class="i-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg></button>
+            <button class="icon-btn" data-play aria-label="Play the tutorial"><svg class="i-play" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg><svg class="i-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg></button>
+          </div>
+        </div>
+        <div class="chapters">
+          <button data-chapter>1. Raise a hand</button>
+          <button data-chapter>2. Make a sign</button>
+          <button data-chapter>3. Make a fist to stop</button>
+          <button data-chapter>4. Play with both hands</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="screen" id="private">
+    <div class="screen-inner">
+      <h2 class="screen-title">Your camera stays on this page.</h2>
+      <p class="screen-lede">Hand tracking runs on your own computer. Nothing you film leaves it unless you press Record clip.</p>
+    </div>
+  </section>
+
+  <section class="screen" id="start">
+    <div class="screen-inner">
+      <h2 class="screen-title">Raise a hand.</h2>
+      <div class="screen-actions"><button class="btn btn-primary btn-lg" data-camera>Turn on camera</button></div>
+    </div>
+  </section>
+</main>
+
+<footer class="landing-foot"><span>Signwave</span><span>No instrument needed. No wrong notes.</span></footer>
+
+<dialog id="settings">
+  <h2>Settings</h2>
+  <div class="set"><div><b>Gesture response</b><small>Steady ignores more flicker</small></div><div class="ctl"><div class="seg" id="stab"><button data-v="2" aria-pressed="false">Fast</button><button data-v="3" aria-pressed="true">Normal</button><button data-v="5" aria-pressed="false">Steady</button></div></div></div>
+  <div class="set"><div><b>Show my camera</b><small>Under the drawn hands</small></div><div class="ctl"><input type="range" id="camOp" min="0" max="100" value="55" aria-label="Camera visibility"></div></div>
+  <div class="set"><div><b>Snap loops to the beat</b></div><div class="ctl"><button class="switch" id="quant" aria-pressed="true" aria-label="Snap loops to the beat"></button></div></div>
+  <div class="set"><div><b>Microphone in clips</b><small>For singing over your playing</small></div><div class="ctl"><button class="switch" id="mic" aria-pressed="false" aria-label="Microphone"></button></div></div>
+  <div class="set"><div><b>Hear myself</b><small>Use headphones</small></div><div class="ctl"><button class="switch" id="monitor" aria-pressed="false" aria-label="Hear myself"></button></div></div>
+  <div class="set"><div><b>MIDI out</b><small>Left hand ch 1, right ch 2</small></div><div class="ctl"><select id="midiOut" style="width:100%"><option value="">Off</option></select></div></div>
+  <div class="set"><div><b>Clip format</b></div><div class="ctl"><div class="seg" id="clipFmt"><button data-v="video" aria-pressed="true">Video</button><button data-v="audio" aria-pressed="false">Audio</button></div></div></div>
+  <p class="keys">No camera? <kbd>A</kbd> to <kbd>;</kbd> play the right hand, <kbd>Z</kbd> to <kbd>/</kbd> the left. <kbd>Space</kbd> starts the beat.</p>
+  <form method="dialog" style="margin-top:var(--space-5);text-align:right"><button class="btn btn-primary">Done</button></form>
+</dialog>
+
+<video id="vid" playsinline muted hidden></video>
+<script type="module" src="app.js"></script>
+</body>
+</html>
