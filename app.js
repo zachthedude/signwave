@@ -1,6 +1,7 @@
 import { Engine, PRESETS, PRESET_MAP, PATTERNS, SCALES, NOTE, nname } from './engine.js';
 import { Puppet, drawHand, pose, toLandmarks, curlsOf } from './hands.js';
 import { waveBackdrop } from './wave.js';
+import { DEMOS, PROGRESSIONS, cleanSong, encodeSong, decodeSong } from './songs.js';
 import { tutorial } from './tutorial.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -47,7 +48,7 @@ const L = { bars: 2, layers: [], state: 'idle', origin: null, armAt: 0, recStart
 function mkZone(i, preset, role) {
   return {
     i, preset, role, oct: PRESET_MAP[preset].oct, arp: 0, vol: .85, name: i ? 'Right' : 'Left',
-    src: { gesture: [], keys: [] }, keyDegs: new Set(), voices: new Map(), held: [], arpIdx: 0,
+    src: { gesture: [], keys: [], song: [] }, keyDegs: new Set(), voices: new Map(), held: [], arpIdx: 0,
     bright: .6, brightT: .6, lastBright: .6, glow: 0,
     hand: null, lost: 99, cand: null, candN: 0, stable: null, sign: null, pinch: [false, false, false, false], upper: false, degs: [],
   };
@@ -65,19 +66,21 @@ let E = null, recDest = null;
 const cam = { ready: false, lm: null, lastT: -1, video: $('#vid'), aspect: 16 / 9 };
 
 /* ================= music helpers ================= */
-function deg2midi(z, d) {
-  const sc = SCALES[S.scale], n = sc.length, i = d - 1;
-  return 12 * (z.oct + 1) + S.key + sc[mod(i, n)] + 12 * Math.floor(i / n);
+function deg2midi(z, d, key = S.key, scale = S.scale) {
+  const sc = SCALES[scale], n = sc.length, i = d - 1;
+  return 12 * (z.oct + 1) + key + sc[mod(i, n)] + 12 * Math.floor(i / n);
 }
-function notesFor(z, d) {
+function notesFor(z, d, key, scale) {
   if (d <= 0) return [];
   if (z.role === 'chord') {
-    const r = deg2midi(z, d);
+    const r = deg2midi(z, d, key, scale);
     if (PRESET_MAP[z.preset].power) return [r, r + 7, r + 12];
-    return [d, d + 2, d + 4].map(x => deg2midi(z, x));
+    return [d, d + 2, d + 4].map(x => deg2midi(z, x, key, scale));
   }
-  return [deg2midi(z, d)];
+  return [deg2midi(z, d, key, scale)];
 }
+// The chord a song's bar names, in that song's own key (a song can be shown before it is loaded).
+const chordIn = (song, d) => notesFor({ oct: 3, role: 'chord', preset: song.left.preset }, d, song.key, song.scale);
 function chordName(ms) {
   if (ms.length < 3) return ms.map(nname).join(' ');
   const r = ms[0], a = ms[1] - r, b = ms[2] - r, root = NOTE[mod(r, 12)];
@@ -98,7 +101,7 @@ function setKeys(z, retrig) { z.src.keys = [...z.keyDegs].flatMap(d => notesFor(
 
 function refresh(z, retrig = false) {
   if (!E) return;
-  const want = [...new Set([...z.src.gesture, ...z.src.keys])].sort((a, b) => a - b);
+  const want = [...new Set([...z.src.gesture, ...z.src.keys, ...z.src.song])].sort((a, b) => a - b);
   if (z.arp) {
     for (const m of [...z.voices.keys()]) endVoice(z, m);
     if (!want.length || !z.held.length) z.arpIdx = 0;
@@ -148,6 +151,7 @@ function stopT() {
   T.running = false;
   if (L.state === 'armed') { L.layers.pop(); L.state = L.layers.length ? 'play' : 'idle'; if (!L.layers.length) L.origin = null; }
   if (L.state === 'rec') L.state = 'play';
+  if (P.playing) stopSong();
   uiTransport();
 }
 setInterval(() => {
@@ -167,6 +171,7 @@ function scheduleStep(s, t) {
     L.recStart = b; L.recEnd = b + L.beats; L.recEndStep = s + L.beats * 4;
     L.recLayer = L.layers[L.layers.length - 1]; L.state = 'rec';
   }
+  if (P.playing) songStep(s, t);   // before the arpeggiator, so a new bar's chord arpeggiates from its first step
   const clicking = L.state === 'armed' || (L.state === 'rec' && T.pattern === 'Off');
   if (clicking && s % 4 === 0) E.drum(i16 === 0 ? 'clickHi' : 'click', t, .9);
 
@@ -342,6 +347,7 @@ function signLogic(z, h) {
     const sg = SIGN_BY_MASK[h.mask];
     if (!sg) return;               // unknown shapes keep the current note instead of flickering
     z.stable = h.mask; z.sign = sg;
+    if (z.i === 0) capture(sg.d);
     setGesture(z, notesFor(z, sg.d), true);
   }
 }
@@ -496,6 +502,21 @@ function draw(now) {
     g.beginPath(); g.arc(rp.x, rp.y, u * (4 + e * 18), 0, 7); g.stroke(); g.restore();
   }
 
+  // While a song plays, the stage shows the words to sing and, if you play the chords, the next sign.
+  if (P.playing) {
+    const bars = P.song.bars, i = Math.max(0, P.bar), cur = bars[i], next = bars[(i + 1) % bars.length], z = zones[0];
+    const cue = (b, lead) => `${lead}${signOf(b[0]).n}, ${b[0] ? chordName(chordIn(P.song, b[0])) : 'rest'}`;
+    g.save(); g.textAlign = 'center'; g.shadowColor = C.night; g.shadowBlur = u * 2;   // words stay readable over the hands
+    g.font = `600 ${Math.max(11 * DPR, u * 2.6)}px Figtree, sans-serif`; g.fillStyle = zc(z);
+    g.fillText(P.bar < 0 ? cue(cur, 'First: ') : P.backing ? `Chord: ${chordName(chordIn(P.song, cur[0])) || 'rest'}` : cue(cur, 'Left hand: '), W / 2, u * 10);
+    if (!P.backing && P.bar >= 0) { g.fillStyle = C.soft; g.fillText(cue(next, 'Next: '), W / 2, u * 14); }
+    g.font = `500 ${u * 5.2}px Newsreader, serif`; g.fillStyle = C.text;
+    g.fillText(P.bar < 0 ? 'Get ready' : cur[1], W / 2, H - u * 18);
+    g.font = `400 ${u * 3.2}px Newsreader, serif`; g.fillStyle = C.soft;
+    g.fillText(P.bar < 0 ? cur[1] : next[1], W / 2, H - u * 13);
+    g.restore();
+  }
+
   if (E && L.state === 'armed' && T.running) {
     const left = Math.ceil((L.armAt - curStepF()) / 4);
     if (left > 0 && left <= 4) {
@@ -557,12 +578,12 @@ function buildZone(z) {
   el.innerHTML = `
     <div class="panel-head"><span class="dot"></span><div><h3>${z.name} hand</h3><p data-sub></p></div><span class="now" data-now aria-live="polite"></span></div>
     <div class="field"><span>Instrument</span><div class="chips">${PRESETS.map(p => `<button class="chip" data-p="${p.id}">${p.name}</button>`).join('')}</div></div>
-    <div class="row" style="justify-content:space-between">
-      <div class="field"><span>Each sign plays</span><div class="seg" data-role><button data-v="note">A note</button><button data-v="chord">A chord</button></div></div>
+    <div class="field"><span>Each sign plays</span><div class="seg" data-role><button data-v="note">A note</button><button data-v="chord">A chord</button></div></div>
+    <details class="more"><summary>Arpeggio, octave and volume</summary>
       <div class="field"><span>Arpeggio</span><div class="seg" data-arp><button data-v="0">Off</button><button data-v="8">1/8</button><button data-v="16">1/16</button></div></div>
-    </div>
-    <div class="row-split"><div class="field"><span>Octave</span><div class="stepper"><button data-o="-1" aria-label="Octave down">−</button><output data-oct></output><button data-o="1" aria-label="Octave up">+</button></div></div>
-      <label class="field"><span>Volume</span><input type="range" min="0" max="100" data-vol></label></div>`;
+      <div class="row-split"><div class="field"><span>Octave</span><div class="stepper"><button data-o="-1" aria-label="Octave down">−</button><output data-oct></output><button data-o="1" aria-label="Octave up">+</button></div></div>
+        <label class="field"><span>Volume</span><input type="range" min="0" max="100" data-vol></label></div>
+    </details>`;
   el.querySelector('.chips').onclick = e => {
     const b = e.target.closest('[data-p]'); if (!b) return;
     z.preset = b.dataset.p; z.oct = PRESET_MAP[z.preset].oct; regen(z); syncZone(z); renderGuide();
@@ -597,6 +618,7 @@ function renderGuide() {
     <small>${s.d ? `<span class="l">${labelFor(Lz, s.d)}</span><span class="r">${labelFor(Rz, s.d)}</span>` : '<span>stop</span>'}</small></button>`).join('');
   $$('.sign', el).forEach((b, k) => drawIcon(b.querySelector('canvas'), list[k]));
   guideState = '';
+  renderComposer();   // its chord names follow the same key and instruments
 }
 function drawIcon(c, s) {
   const px = 64 * Math.min(2, devicePixelRatio || 1); c.width = c.height = px;
@@ -732,7 +754,7 @@ function keyTarget(code) {
 addEventListener('keydown', e => {
   if (e.target.matches?.('input,select,dialog *') || e.ctrlKey || e.metaKey || e.altKey) return;
   const k = keyTarget(e.code);
-  if (k) { e.preventDefault(); if (e.repeat) return; initAudio(); k[0].keyDegs.add(k[1]); setKeys(k[0], true); return; }
+  if (k) { e.preventDefault(); if (e.repeat) return; initAudio(); k[0].keyDegs.add(k[1]); setKeys(k[0], true); if (k[0].i === 0) capture(k[1]); return; }
   if (e.repeat || !E) return;
   if (e.code === 'Space' && !e.target.matches?.('button')) { e.preventDefault(); T.running ? stopT() : startT(); }
 });
@@ -786,10 +808,195 @@ function toggleClip() {
   recTimer = setInterval(() => { const s = (Date.now() - recStart) / 1000 | 0; $('#clipBtn').textContent = `Stop  ${s / 60 | 0}:${String(s % 60).padStart(2, '0')}`; }, 250);
 }
 
+/* ================= songs: sing along, lyrics, write your own ================= */
+// A song drives the left hand like another input (z.src.song), so the arpeggio,
+// looper, MIDI and stage labels all work on it without a second code path.
+const P = { song: null, src: null, playing: false, start: 0, bar: -1, backing: true };
+const CMP = { sel: 0, bars: [], editId: null, visible: false };
+const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+const signOf = d => SIGNS.find(s => s.d === d) || SIGNS[0];
+let mySongs = [], shown = DEMOS[0];
+try { mySongs = (JSON.parse(localStorage.getItem('signwave.songs')) || []).map(cleanSong).filter(Boolean); } catch (e) { /* storage blocked or corrupt: start empty */ }
+function saveMine() { try { localStorage.setItem('signwave.songs', JSON.stringify(mySongs)); return true; } catch (e) { return false; } }
+
+function applySong(s) {
+  const [l, r] = zones;
+  S.key = s.key; S.scale = s.scale; T.bpm = s.bpm; T.pattern = s.beat;
+  Object.assign(l, { preset: s.left.preset, role: s.left.role, arp: s.left.arp, oct: PRESET_MAP[s.left.preset].oct });
+  Object.assign(r, { preset: s.right.preset, oct: PRESET_MAP[s.right.preset].oct });
+  $('#key').value = S.key; $('#scale').value = S.scale; $('#beat').value = T.pattern;
+  $('#bpm').value = T.bpm; $('#bpmTxt').textContent = T.bpm + ' bpm'; E?.setTempo(T.bpm);
+  zones.forEach(z => { regen(z); syncZone(z); });
+  renderGuide();
+}
+
+function playSong(song, src) {
+  initAudio();
+  const again = P.playing && P.src === src;
+  stopSong();
+  if (again) return;
+  if (S.source === 'bot') setSource('idle');
+  applySong(song);
+  startT();
+  Object.assign(P, { song, src, playing: true, bar: -1, start: Math.ceil(T.step / 16) * 16 + 16 });   // one bar of count-in
+  uiSong();
+}
+function stopSong() {
+  if (!P.playing) return;
+  P.playing = false; P.bar = -1;
+  zones[0].src.song = []; refresh(zones[0]);
+  uiSong(); markBar();
+}
+function songStep(s, t) {
+  const rel = s - P.start, bars = P.song.bars;
+  if (rel < 0) { if (rel >= -16 && s % 4 === 0) E.drum(mod(s, 16) === 0 ? 'clickHi' : 'click', t, .9); return; }
+  if (rel % 16) return;
+  let bar = rel / 16;
+  if (bar >= bars.length) { P.start = s; bar = 0; }   // songs loop until you stop them
+  const z = zones[0], ms = P.backing ? notesFor(z, bars[bar][0]) : [];
+  const go = () => { if (!P.playing) return; P.bar = bar; z.src.song = ms; refresh(z, true); markBar(); };
+  // The arpeggiator reads the chord at schedule time; held voices start on the beat itself.
+  z.arp ? go() : setTimeout(go, Math.max(0, (t - E.ctx.currentTime) * 1000));
+}
+
+function uiSong() {
+  $('#songPlay').textContent = P.playing && P.src === shown.id ? 'Stop song' : 'Play song';
+  $('#cPlay').textContent = P.playing && P.src === 'composer' ? 'Stop' : 'Play it';
+}
+function markBar() {
+  $$('.bar.now').forEach(b => b.classList.remove('now'));
+  if (!P.playing || P.bar < 0) return;
+  const sheet = P.src === 'composer' ? $('#cSheet') : P.src === shown.id ? $('#sheet') : null;
+  sheet?.querySelector(`[data-i="${P.bar}"]`)?.classList.add('now');
+}
+
+// One lead sheet for reading and for writing: chord, its notes, the sign that plays it, the words.
+function sheetHTML(song, edit) {
+  return song.bars.map(([d, ly], i) => {
+    const ns = chordIn(song, d), chord = d ? chordName(ns) : 'Rest';
+    if (!edit) return `<div class="bar" data-i="${i}"><span class="num">${i + 1}</span><span class="ch">${esc(chord)}</span>
+      <span class="nt">${ns.map(m => NOTE[mod(m, 12)]).join(' ') || '&nbsp;'}</span><span class="sg">${signOf(d).n}</span><span class="ly">${esc(ly) || '&nbsp;'}</span></div>`;
+    const opts = [0, 1, 2, 3, 4, 5, 6, 7].map(k => `<option value="${k}"${k === d ? ' selected' : ''}>${k ? esc(chordName(chordIn(song, k))) : 'Rest'}, ${signOf(k).n}</option>`).join('');
+    return `<div class="bar${i === CMP.sel ? ' sel' : ''}" data-i="${i}"><span class="num">${i + 1}</span>
+      <select aria-label="Chord for bar ${i + 1}">${opts}</select>
+      <input aria-label="Words for bar ${i + 1}" maxlength="80" placeholder="Words for this bar" value="${esc(ly)}"></div>`;
+  }).join('');
+}
+
+function renderSongs() {
+  const item = s => `<button class="song-item" data-id="${esc(s.id)}" aria-pressed="${s === shown}"><b>${esc(s.title)}</b>
+    <span>${s.sing ? `Singing: ${s.sing.skill}` : `${s.bars.length} bars in ${NOTE[s.key]} ${esc(s.scale.toLowerCase())}`}</span>${s.play ? `<span>Playing: ${s.play.skill}</span>` : ''}</button>`;
+  $('#songList').innerHTML = `<h4>Demo songs</h4>${DEMOS.map(item).join('')}<h4>My songs</h4>` +
+    (mySongs.length ? mySongs.map(item).join('') : '<p class="song-empty">Songs you save under Write your own song appear here.</p>');
+}
+function showSong(s) {
+  shown = s;
+  $('#songTitle').textContent = s.title;
+  $('#songMeta').textContent = `${NOTE[s.key]} ${s.scale.toLowerCase()}, ${s.bpm} bpm, ${s.beat} beat. Left hand: ${PRESET_MAP[s.left.preset].name}. Right hand: ${PRESET_MAP[s.right.preset].name}.`;
+  $('#songSkills').innerHTML = s.sing
+    ? [['0', 'Singing skill', s.sing], ['1', 'Playing skill', s.play]].map(([z, k, v]) => `<div class="skill" data-z="${z}"><small>${k}</small><h5>${v.skill}</h5><p>${v.how}</p></div>`).join('')
+    : `<div class="skill" data-z="1"><small>Your song</small><h5>Make it yours</h5><p>Open it in the editor to change chords or words.</p>
+       <div class="row" style="margin-top:var(--space-3)"><button class="btn btn-sm btn-outline" data-edit>Edit</button><button class="btn btn-sm btn-ghost" data-delete>Delete</button></div></div>`;
+  $('#sheet').innerHTML = sheetHTML(s, false);
+  renderSongs(); uiSong(); markBar();
+}
+
+function setBars(n) {
+  const b = CMP.bars;
+  CMP.bars = Array.from({ length: n }, (_, i) => b[i] || [b.length ? b[i % b.length][0] : 1, '']);
+  CMP.sel = Math.min(CMP.sel, n - 1);
+}
+function draft() {
+  const [l, r] = zones;
+  return cleanSong({ id: CMP.editId || undefined, title: $('#cTitle').value, key: S.key, scale: S.scale, bpm: T.bpm, beat: T.pattern,
+    left: { preset: l.preset, role: l.role, arp: l.arp }, right: { preset: r.preset }, bars: CMP.bars });
+}
+function renderComposer() {
+  if (!CMP.bars.length) return;
+  const d = draft();
+  $('#cSheet').innerHTML = sheetHTML(d, true);
+  $('#cProg').innerHTML = PROGRESSIONS.map((p, i) => `<button class="chip" data-prog="${i}">${p.name}: ${p.degs.slice(0, 4).map(k => esc(chordName(chordIn(d, k)))).join(' ')}</button>`).join('');
+  markBar();
+}
+function loadIntoComposer(s, editId) {
+  applySong(s);
+  CMP.bars = s.bars.map(b => [...b]); CMP.editId = editId; CMP.sel = 0;
+  $('#cTitle').value = s.title; $('#cBars').value = String(s.bars.length);
+  if (!$('#cBars').value) { $('#cBars').insertAdjacentHTML('beforeend', `<option>${s.bars.length}</option>`); $('#cBars').value = String(s.bars.length); }
+  renderComposer();
+}
+// A sign made with the left hand while the editor is on screen fills the picked bar.
+function capture(d) {
+  // A fist between signs is just a pause, not a chord choice; Rest is in the bar's menu.
+  if (!d || !CMP.visible || P.playing || $('#cCapture').getAttribute('aria-pressed') !== 'true') return;
+  CMP.bars[CMP.sel][0] = d > 7 ? d - 7 : d;   // Rock, Call me and L-shape are the first chords an octave up
+  CMP.sel = (CMP.sel + 1) % CMP.bars.length;
+  renderComposer();
+}
+
+function initSongs() {
+  setBars(8); CMP.bars = CMP.bars.map((b, i) => [PROGRESSIONS[0].degs[i % 4], '']);
+  renderComposer(); showSong(DEMOS[0]);
+  $('#songList').onclick = e => { const b = e.target.closest('[data-id]'); if (b) showSong([...DEMOS, ...mySongs].find(s => s.id === b.dataset.id)); };
+  $('#songPlay').onclick = () => playSong(shown, shown.id);
+  segment($('#backing'), v => { P.backing = v === 'on'; if (!P.backing) { zones[0].src.song = []; refresh(zones[0]); } });
+  $('#songSkills').onclick = e => {
+    if (e.target.closest('[data-edit]')) { loadIntoComposer(shown, shown.id); $('#write').scrollIntoView({ behavior: 'smooth' }); }
+    if (e.target.closest('[data-delete]') && confirm(`Delete "${shown.title}"?`)) { mySongs = mySongs.filter(s => s !== shown); saveMine(); showSong(DEMOS[0]); }
+  };
+
+  const sheet = $('#cSheet');
+  sheet.addEventListener('click', e => {
+    const b = e.target.closest('.bar'); if (!b) return;
+    CMP.sel = +b.dataset.i; $$('.bar', sheet).forEach(x => x.classList.toggle('sel', x === b));
+  });
+  sheet.addEventListener('focusin', e => e.target.closest('.bar')?.click());
+  sheet.addEventListener('change', e => { if (e.target.matches('select')) { CMP.bars[+e.target.closest('.bar').dataset.i][0] = +e.target.value; renderComposer(); } });
+  sheet.addEventListener('input', e => { if (e.target.matches('input')) CMP.bars[+e.target.closest('.bar').dataset.i][1] = e.target.value; });
+  $('#cProg').onclick = e => {
+    const b = e.target.closest('[data-prog]'); if (!b) return;
+    const p = PROGRESSIONS[+b.dataset.prog];
+    if (p.degs.length > CMP.bars.length) { setBars(p.degs.length); $('#cBars').value = String(p.degs.length); }
+    CMP.bars = CMP.bars.map((bar, i) => [p.degs[i % p.degs.length], bar[1]]);
+    renderComposer();
+  };
+  $('#cBars').onchange = e => { setBars(+e.target.value); renderComposer(); };
+  switcher($('#cCapture'), () => {});
+  $('#cPlay').onclick = () => playSong(draft(), 'composer');
+  $('#cSave').onclick = () => {
+    const s = draft(), i = mySongs.findIndex(m => m.id === s.id);
+    i >= 0 ? (mySongs[i] = s) : mySongs.push(s);
+    CMP.editId = s.id;
+    toast(saveMine() ? `Saved "${s.title}" to My songs` : 'Your browser is blocking storage, so the song could not be saved. Copy a share link instead.');
+    renderSongs();
+  };
+  $('#cShare').onclick = () => {
+    const url = location.href.split('#')[0] + '#song=' + encodeSong(draft());
+    navigator.clipboard?.writeText(url).then(() => toast('Share link copied'), () => prompt('Copy this link', url)) ?? prompt('Copy this link', url);
+  };
+  $('#cNew').onclick = () => {
+    CMP.editId = null; CMP.sel = 0; $('#cTitle').value = '';
+    CMP.bars = Array.from({ length: +$('#cBars').value }, (_, i) => [PROGRESSIONS[0].degs[i % 4], '']);
+    renderComposer();
+  };
+  new IntersectionObserver(([e]) => { CMP.visible = e.isIntersecting; }, { threshold: .25 }).observe($('.composer'));
+
+  // A shared link opens straight into the editor, ready to play or save,
+  // including when it is pasted into a tab that already has the page open.
+  const openFromHash = () => {
+    if (!location.hash.startsWith('#song=')) return;
+    const s = decodeSong(decodeURIComponent(location.hash.slice(6)));
+    if (s) { loadIntoComposer(s, null); setTimeout(() => { $('#write').scrollIntoView(); toast(`Opened "${s.title}" from a share link`); }, 300); }
+    else toast('That share link is damaged, so the song could not be opened.');
+  };
+  openFromHash();
+  addEventListener('hashchange', openFromHash);
+}
+
 /* ================= start ================= */
 let level = new Float32Array(512);
 const wave = waveBackdrop($('#wave'), [
-  { id: 'play', shape: 'burst' }, { id: 'learn', shape: 'pulse' }, { id: 'private', shape: 'calm' }, { id: 'start', shape: 'rise' },
+  { id: 'play', shape: 'burst' }, { id: 'learn', shape: 'pulse' }, { id: 'sing', shape: 'steady' }, { id: 'write', shape: 'rise' },
 ], () => {
   if (!E) return 0;
   E.analyser.getFloatTimeDomainData(level);
@@ -798,6 +1005,7 @@ const wave = waveBackdrop($('#wave'), [
 });
 
 initUI();
+initSongs();
 tutorial($('#tutorial'), {
   colors: { L: C.L, R: C.R, line: C.line, text: C.text, room: C.night },
   song: SONG,
@@ -811,4 +1019,4 @@ tutorial($('#tutorial'), {
 });
 addEventListener('pointerdown', () => initAudio(), { once: true });
 requestAnimationFrame(frame);
-window.__signwave = { get E() { return E; }, zones, S, T, L, bot, cam, analyze, processHands, setSource, loopPress, curls: curlsOf, pose, toLandmarks, SIGN_BY_MASK };
+window.__signwave = { get E() { return E; }, zones, S, T, L, P, CMP, playSong, bot, cam, analyze, processHands, setSource, loopPress, curls: curlsOf, pose, toLandmarks, SIGN_BY_MASK };

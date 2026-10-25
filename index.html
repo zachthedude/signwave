@@ -16,6 +16,8 @@
   <a class="brand" href="#play"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4"/></svg>Signwave</a>
   <nav>
     <a class="btn btn-ghost btn-sm" href="#learn">How to play</a>
+    <a class="btn btn-ghost btn-sm" href="#sing">Sing along</a>
+    <a class="btn btn-ghost btn-sm" href="#write">Write a song</a>
     <button class="btn btn-ghost btn-sm" data-open="settings">Settings</button>
   </nav>
 </header>
@@ -40,7 +42,6 @@
           <button class="btn btn-sm" id="sourceBtn">Use my camera</button>
           <button class="btn btn-sm" id="clipBtn" aria-pressed="false">Record clip</button>
         </div>
-        <div class="toast" id="toast" role="status"></div>
       </div>
 
       <div class="signs" id="guide"></div>
@@ -60,7 +61,7 @@
             </div>
             <div class="beats" id="steps"></div>
           </div>
-          <div class="field"><span>Looper</span>
+          <details class="more"><summary>Loop recorder</summary>
             <div class="loop">
               <button class="btn btn-outline loop-btn" id="loopBtn" data-s="idle">Record a loop</button>
               <span class="row" style="gap:4px">
@@ -70,7 +71,7 @@
               </span>
               <div class="loop-meta"><span id="layers">Nothing recorded</span><span class="bar"><i id="lprog"></i></span></div>
             </div>
-          </div>
+          </details>
         </section>
         <section class="panel hand" data-z="1"></section>
       </div>
@@ -99,22 +100,56 @@
     </div>
   </section>
 
-  <section class="screen" id="private">
-    <div class="screen-inner">
-      <h2 class="screen-title">Your camera stays on this page.</h2>
-      <p class="screen-lede">Hand tracking runs on your own computer. Nothing you film leaves it unless you press Record clip.</p>
+  <section class="screen" id="sing">
+    <div class="screen-inner wide">
+      <h2 class="screen-title">Sing along.</h2>
+      <p class="screen-lede">Each song practises one singing skill and one playing skill. Let the backing play the chords, or play them yourself with your left hand.</p>
+      <div class="sing">
+        <div class="song-list" id="songList" role="list"></div>
+        <div class="song-view">
+          <div class="song-head">
+            <div><h3 id="songTitle"></h3><p id="songMeta"></p></div>
+            <div class="row">
+              <div class="seg" id="backing" aria-label="Who plays the chords"><button data-v="on" aria-pressed="true">Backing plays chords</button><button data-v="off" aria-pressed="false">I play the chords</button></div>
+              <button class="btn btn-primary" id="songPlay">Play song</button>
+            </div>
+          </div>
+          <div class="skills" id="songSkills"></div>
+          <h4 class="sheet-title">Lyrics</h4>
+          <div class="sheet" id="sheet"></div>
+        </div>
+      </div>
     </div>
   </section>
 
-  <section class="screen" id="start">
-    <div class="screen-inner">
-      <h2 class="screen-title">Raise a hand.</h2>
-      <div class="screen-actions"><button class="btn btn-primary btn-lg" data-camera>Turn on camera</button></div>
+  <section class="screen" id="write">
+    <div class="screen-inner wide">
+      <h2 class="screen-title">Write your own song.</h2>
+      <p class="screen-lede">Choose a chord for each bar by making a sign, write a line under it, then sing it back.</p>
+      <div class="composer panel">
+        <div class="row comp-top">
+          <label class="field" style="flex:1"><span>Title</span><input id="cTitle" maxlength="60" placeholder="Untitled song"></label>
+          <label class="field"><span>Bars</span><select id="cBars"><option>4</option><option selected>8</option><option>12</option><option>16</option></select></label>
+          <div class="field"><span>Start from</span><div class="chips" id="cProg"></div></div>
+        </div>
+        <div class="comp-fill">
+          <button class="switch" id="cCapture" aria-pressed="true" aria-label="Fill bars with my left hand"></button>
+          <p><b>Fill bars with my left hand.</b> Pick a bar, then make a sign with your left hand (or press <kbd>Z</kbd> to <kbd>/</kbd>). The chord goes in and the next bar is picked for you.</p>
+        </div>
+        <div class="sheet edit" id="cSheet"></div>
+        <p class="comp-note">Your song uses the key, tempo, beat and instruments set under the stage.</p>
+        <div class="row comp-actions">
+          <button class="btn btn-primary" id="cPlay">Play it</button>
+          <button class="btn btn-outline" id="cSave">Save to my songs</button>
+          <button class="btn btn-outline" id="cShare">Copy share link</button>
+          <button class="btn btn-ghost" id="cNew">Start over</button>
+        </div>
+      </div>
     </div>
   </section>
 </main>
 
-<footer class="landing-foot"><span>Signwave</span><span>No instrument needed. No wrong notes.</span></footer>
+<footer class="landing-foot"><span>Signwave</span><span>Hand tracking runs on your own computer. Nothing you film leaves it unless you press Record clip.</span></footer>
 
 <dialog id="settings">
   <h2>Settings</h2>
@@ -129,6 +164,7 @@
   <form method="dialog" style="margin-top:var(--space-5);text-align:right"><button class="btn btn-primary">Done</button></form>
 </dialog>
 
+<div class="toast" id="toast" role="status"></div>
 <video id="vid" playsinline muted hidden></video>
 <script type="module" src="app.js"></script>
 </body>
